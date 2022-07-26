@@ -1,0 +1,29 @@
+name: "windows-workstation"
+label: "Windows Workstation"
+description: Windows workstation accessible via a web browser.
+logo: https://upload.wikimedia.org/wikipedia/commons/5/5f/Windows_logo_-_2012.svg
+
+# Workstations can be deployed without an SSH key
+requires_ssh_key: false
+
+
+parameters:
+  - name: windows_flavor
+    kind: cloud.size
+    label: Workstation Size
+    description: The size of the workstation.
+    immutable: true
+    options:
+      min_ram: 4096
+      min_disk: 10
+
+
+usage_template: |-
+  {% set webconsole = cluster | service("webconsole") %}
+  This workstation can be accessed via a web browser using the [Web console service]({{ webconsole.url }}).
+
+
+services:
+  - name: webconsole
+    label: Web console
+    icon_url: https://dyltqmyl993wv.cloudfront.net/assets/stacks/guacamole/img/guacamole-stack-220x234.png

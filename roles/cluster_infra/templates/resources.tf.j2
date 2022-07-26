@@ -1,0 +1,113 @@
+#####
+##### The identity scope we are operating in
+##### Used to add tge OpenStack user name to instance metadata
+#####
+data "openstack_identity_auth_scope_v3" "scope" {
+  name = "{{ cluster_name }}"
+}
+
+#####
+##### Security groups
+#####
+
+# Security group to hold rules for the node
+resource "openstack_networking_secgroup_v2" "cluster_secgroup" {
+  name                 = "{{ cluster_name }}-{{ cluster_type }}"
+  delete_default_rules = true   # Fully manage with terraform
+}
+
+# Allow all egress
+resource "openstack_networking_secgroup_rule_v2" "cluster_egress_v4" {
+  direction         = "egress"
+  ethertype         = "IPv4"
+  security_group_id = "${openstack_networking_secgroup_v2.cluster_secgroup.id}"
+}
+
+# Allow all ingress from other nodes in the security group
+resource "openstack_networking_secgroup_rule_v2" "cluster_ingress_internal_v4" {
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  remote_group_id   = "${openstack_networking_secgroup_v2.cluster_secgroup.id}"
+  security_group_id = "${openstack_networking_secgroup_v2.cluster_secgroup.id}"
+}
+
+#####
+##### Cluster volumes
+#####
+
+resource "openstack_blockstorage_volume_v3" "zenith_volume" {
+  name = "{{ cluster_name }}-rdp-gateway-zenith"
+  size = 1
+}
+
+#####
+##### Admin password
+#####
+resource "random_password" "admin_password" {
+  length = 16
+  min_lower = 1
+  min_upper = 1
+  min_numeric = 1
+  special = false
+}
+
+#####
+##### Cluster nodes
+#####
+
+resource "openstack_compute_instance_v2" "workstation" {
+  name      = "{{ cluster_name }}-workstation"
+  image_id  = "{{ windows_image_previous | default(windows_image) }}"
+  flavor_id = "{{ windows_flavor }}"
+
+  network {
+    name = "{{ cluster_network }}"
+  }
+
+  security_groups = ["${openstack_networking_secgroup_v2.cluster_secgroup.name}"]
+
+  user_data = <<-EOF
+    #ps1
+    net user {{ admin_username }} ${random_password.admin_password.result}
+  EOF
+}
+
+resource "openstack_compute_instance_v2" "rdp_gateway" {
+  name      = "{{ cluster_name }}-rdp-gateway"
+  image_id  = "{{ rdp_gateway_image_previous | default(rdp_gateway_image) }}"
+  flavor_id = "{{ rdp_gateway_flavor }}"
+
+  network {
+    name = "{{ cluster_network }}"
+  }
+
+  security_groups = ["${openstack_networking_secgroup_v2.cluster_secgroup.name}"]
+
+  metadata = {
+    rdp_host = "${openstack_compute_instance_v2.workstation.network[0].fixed_ip_v4}"
+    rdp_username = "{{ admin_username }}"
+    rdp_password = "${random_password.admin_password.result}"
+    zenith_volume_id = "${openstack_blockstorage_volume_v3.zenith_volume.id}"
+    zenith_registrar_url = "{{ zenith_registrar_url }}"
+    zenith_registrar_token_webconsole = "{{ zenith_token_webconsole }}"
+    zenith_sshd_host = "{{ zenith_sshd_host }}"
+    zenith_sshd_port = "{{ zenith_sshd_port }}"
+    azimuth_cloud_name = "notused"
+    azimuth_user_name = "${data.openstack_identity_auth_scope_v3.scope.user_name}"
+    azimuth_user_id = "${data.openstack_identity_auth_scope_v3.scope.user_id}"
+    azimuth_project_name = "${data.openstack_identity_auth_scope_v3.scope.project_name}"
+    azimuth_project_id = "${data.openstack_identity_auth_scope_v3.scope.project_id}"
+  }
+
+  # Force the RDP gateway to be redeployed when the workstation changes
+  lifecycle {
+    replace_triggered_by = [
+      openstack_compute_instance_v2.workstation
+    ]
+  }
+}
+
+resource "openstack_compute_volume_attach_v2" "zenith_volume" {
+  instance_id = "${openstack_compute_instance_v2.rdp_gateway.id}"
+  volume_id   = "${openstack_blockstorage_volume_v3.zenith_volume.id}"
+}

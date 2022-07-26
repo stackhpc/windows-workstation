@@ -1,0 +1,10 @@
+# These outputs are used to determine the images to use, unless explicitly patching
+output "rdp_gateway_image" {
+  description = "The id of the image used to build the RDP gateway"
+  value       = "{{ rdp_gateway_image_previous | default(rdp_gateway_image) }}"
+}
+
+output "windows_image" {
+  description = "The id of the image used to build the Windows workstation"
+  value       = "{{ windows_image_previous | default(windows_image) }}"
+}
